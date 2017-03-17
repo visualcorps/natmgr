@@ -1,0 +1,15 @@
+-A POSTROUTING -o "$EXTIF" -j MASQUERADE
+COMMIT
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A FORWARD -i "$EXTIF" -o "$INTIF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A FORWARD -i "$INTIF" -o "$EXTIF" -j ACCEPT
+COMMIT
+EOF
+#-A PREROUTING -i "$EXTIF" -p tcp --dport 80   -j DNAT --to-destination 10.90.90.55:9000
+#-A FORWARD -j LOG
+
+echo -e "\nrc.firewall-iptables v$FWVER done.\n"
+ufw enable
