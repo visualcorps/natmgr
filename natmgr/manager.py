@@ -22,7 +22,12 @@ __all__ = ['manage']
 
 @click.group(context_settings={'help_option_names': ['-h', '--help']})
 def manage():
-    """Manage NAT rules on the router."""
+    """Manage NAT rules on the router.
+
+    For help on a specific command, run:
+
+        nat <command> --help
+    """
     if PRODUCTION:
         try:
             with as_root():
@@ -33,30 +38,49 @@ def manage():
 
 
 @manage.command(name='list')
-@click.option('-e', '--expired-only', help='Show only expired rules.', is_flag=True)
 @click.option('-c', '--current-only', help='Show only current rules.', is_flag=True)
+@click.option('-e', '--expired-only', help='Show only expired rules.', is_flag=True)
 def list_rules(expired_only, current_only):
-    """Show a list of NAT rules."""
+    """Show a list of NAT rules.
+
+    You can view just the current, non-expired rules by providing the -c flag,
+    or view just the expired rules with the -e flag.
+    """
     mgr = Manager()
     mgr.print_rules(expired_only, current_only)
 
 
 @manage.command()
-def add():
-    """Add a new NAT rule."""
+@click.argument('port', default=None, required=False, type=int)
+def add(port):
+    """Add a new NAT rule.
+
+    Optionally, you can specify a port when you invoke this command, which will
+    bypass the first prompt for a port number.
+
+    Port *must* be an integer between 1024 and 65535.
+    """
     mgr = Manager()
     while True:
-        port = click.prompt('Enter the port number', type=int)
-        if not mgr.existing_port(port):
-            break
-        mgr.print_rules(simple=True)
-        click.echo('  ** I\'m sorry, that port has already been taken. Choose one that\'s not listed above.')
+        if port is None:
+            port = click.prompt('Enter the port number', type=int)
+        else:
+            click.echo('Adding a rule for port {}'.format(port))
+        if mgr.existing_port(port):
+            mgr.print_rules(simple=True)
+            click.echo('  ** I\'m sorry, that port has already been taken. Choose one that\'s not listed above.')
+            continue
+        if port < 1024 or port >= 65535:
+            click.echo('  ** Invalid port number. Must be in range 1024 <= port < 65535. Please try again.')
+            continue
+        break
 
     name = click.prompt('Enter the requester\'s name')
     email = click.prompt('Enter the requester\'s email')
     ip = click.prompt('Enter the IP address of dest machine')
     dest_port = click.prompt('Enter the port on the dest machine', type=int)
 
+    expires = 0
     date_valid = False
     while not date_valid:
         expires = click.prompt('Enter expiration date (YYYY-MM-DD or 0 for never)')
@@ -108,7 +132,12 @@ def add():
 @manage.command()
 @click.argument('ports', type=int, nargs=-1)
 def remove(ports):
-    """Remove a NAT rule."""
+    """Remove a NAT rule.
+
+    It's possible to provide multiple ports to remove at the same time. If no
+    port number is specified as an argument, you'll be prompted for it after a
+    list of all rules is shown.
+    """
     if not len(ports):
         return remove_prompt()
 
@@ -176,7 +205,12 @@ def remove_prompt():
 
 @manage.command()
 def clean():
-    """Permanently remove expired NAT rules."""
+    """Permanently remove expired NAT rules.
+
+    You will be prompted before the rules take permanent effect, but even if
+    you don't select for the rules to take effect immediately, they may be
+    enforced automatically by the cron job.
+    """
     mgr = Manager()
     mgr.print_rules(expired_only=True)
     num = mgr.clean_rules()
@@ -197,7 +231,15 @@ def clean():
 
 @manage.command()
 def restart():
-    """Clean rules, then force rules to take effect."""
+    """Clean rules, then force rules to take effect.
+
+    This command is intended to be used by the cron job to clean old rules
+    automatically on a regular basis. Unless there's an issue with the cron
+    job, it usually won't be necessary to run this manually. All of the
+    functionality is also available from the `clean` command, with the only
+    difference being that this command will not prompt before taking any
+    actions.
+    """
     mgr = Manager()
     mgr.clean_rules()
     mgr.save_rules()
@@ -302,10 +344,6 @@ class Manager:
     
     def save_rules(self):
         """Save the rules, overwriting the previous file."""
-        # if not PRODUCTION:
-        #     return
-        # TODO: If there's an error below, the file is lost!
-
         with open(RULES_FILE, 'w') as rules_file:
             json.dump(self.rules, rules_file, indent=2)
 
@@ -358,10 +396,10 @@ class Manager:
             click.echo('Report of {} NAT Rules'.format(rule_type).center(56))
         click.echo()
 
-        line_fmt = ' {in_port:>6}  {dest_ip:>15}:{dest_port:<5}  {expires:^10}  {requested_by}'
-        click.echo(line_fmt.format(in_port='Port #', dest_ip='IP Address', dest_port='Port', expires='Expires On',
-                                   requested_by='Requested By'))
-        click.echo(' ' + '-'*6 + '  ' + '-'*21 + '  ' + '-'*10 + '  ' + '-'*12)
+        line_fmt = ' {in_port:>6}  {dest_ip:<15}:{dest_port:>5}  {expires:^10}  {requested_by}'
+        click.echo(line_fmt.format(in_port='Port #', dest_ip='IP Address'.center(19), dest_port='Port',
+                                   expires='Expires On', requested_by='Requested By'))
+        click.echo(' ' + '-'*6 + '  ' + '-'*25 + '  ' + '-'*10 + '  ' + '-'*12)
 
         num_matches = 0
         for rule in self.rules:
@@ -377,6 +415,7 @@ class Manager:
             _rule = copy(rule)
             if _rule['expires'] == 0:
                 _rule['expires'] = 'Never!'
+            _rule['dest_ip'] = '.'.join(['{:>4}'.format(x) for x in _rule['dest_ip'].split('.')])
             click.echo(line_fmt.format(**_rule))
             num_matches += 1
 

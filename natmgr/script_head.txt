@@ -5,7 +5,6 @@ MODPROBE=/sbin/modprobe
 
 EXTIF="eth0"
 INTIF="eth1"
-#INTIF2="eth0"
 echo "   External Interface:  $EXTIF"
 echo "   Internal Interface:  $INTIF"
 

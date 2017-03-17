@@ -8,8 +8,6 @@ COMMIT
 -A FORWARD -i "$INTIF" -o "$EXTIF" -j ACCEPT
 COMMIT
 EOF
-#-A PREROUTING -i "$EXTIF" -p tcp --dport 80   -j DNAT --to-destination 10.90.90.55:9000
-#-A FORWARD -j LOG
 
 echo -e "\nrc.firewall-iptables v$FWVER done.\n"
 ufw enable
