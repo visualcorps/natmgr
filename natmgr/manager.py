@@ -6,16 +6,19 @@ from datetime import date, timedelta
 from os import seteuid, geteuid, fchmod
 from os.path import join, dirname, abspath
 from stat import S_IRWXU, S_IRGRP, S_IROTH
+from sys import stdout
 from tempfile import TemporaryFile
 
 import click
+import pexpect
 
 RULES_FILE = abspath(join(dirname(__file__), 'rules.json'))
 SCRIPT_HEAD = abspath(join(dirname(__file__), 'script_head.txt'))
 SCRIPT_FOOT = abspath(join(dirname(__file__), 'script_foot.txt'))
 NAT_SCRIPT = '/etc/init.d/nat.sh'
+PROC_TIMEOUT = 10  # Max seconds for a subprocess to complete execution
 
-PRODUCTION = False
+PRODUCTION = True
 
 __all__ = ['manage']
 
@@ -367,8 +370,8 @@ class Manager:
             with as_root(), open(NAT_SCRIPT, 'w') as fp:
                 fp.write(script.read())
 
-            # Set file permissions to -rwxr--r--
-            fchmod(fp.fileno(), S_IRWXU | S_IRGRP | S_IROTH)
+                # Set file permissions to -rwxr--r--
+                fchmod(fp.fileno(), S_IRWXU | S_IRGRP | S_IROTH)
 
     def print_rules(self, expired_only=False, current_only=False, simple=False, single=None):
         """Print the rules to the screen, formatting them nicely.
@@ -449,5 +452,20 @@ class Manager:
 
 
 def run_nat_script():
-    # TODO: Execute nat.sh to put the new rules into effect
-    print('This is where I\'m supposed to execute the script...')
+    """Execute nat.sh to put the new rules into effect."""
+    disrupt = 'Command may disrupt existing ssh connections. Proceed with operation (y|n)?'
+    success = 'Firewall is active and enabled on system startup'
+
+    click.echo('\nRunning {}\n'.format(NAT_SCRIPT))
+    with as_root():
+        child = pexpect.spawn(NAT_SCRIPT, timeout=PROC_TIMEOUT, logfile=stdout)
+        try:
+            index = child.expect_exact([disrupt, success])
+            if index == 0:
+                child.sendline('y')
+                child.expect_exact([success])
+            child.expect(pexpect.EOF)
+        except pexpect.TIMEOUT:
+            click.echo('\n\n  ** Process failed to complete within {} seconds. Terminating...\n'.format(PROC_TIMEOUT))
+            exit(1)
+    click.echo('{} executed successfully'.format(NAT_SCRIPT))

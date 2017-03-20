@@ -11,7 +11,7 @@ be used for a limited period of time.
 
 First, you'll need to clone the repository, for example:
 ```git
-git clone git@github.com:mmabey/natmgr.git
+git clone https://github.com/mmabey/natmgr.git
 ```
 
 Then, run the `Makefile` from within the project directory:
@@ -32,6 +32,17 @@ If this fails, here are the steps that the Makefile is supposed to do:
 
 If the installation had problems for you, please create an issue on the [project page](https://github.com/mmabey/natmgr)
 on GitHub.
+
+
+### Getting the latest version
+
+After you've installed NATMGR once, all you need to do to update it is to pull the latest changes from the git repo and
+rerun the `Makefile`:
+```bash
+cd natmgr; git pull && make
+```
+
+That's it!
 
 
 ## Usage
