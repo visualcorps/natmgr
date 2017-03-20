@@ -458,7 +458,7 @@ def run_nat_script():
 
     click.echo('\nRunning {}\n'.format(NAT_SCRIPT))
     with as_root():
-        child = pexpect.spawn(NAT_SCRIPT, timeout=PROC_TIMEOUT, logfile=stdout)
+        child = pexpect.spawn(NAT_SCRIPT, timeout=PROC_TIMEOUT, logfile=stdout, encoding='utf-8')
         try:
             index = child.expect_exact([disrupt, success])
             if index == 0:
