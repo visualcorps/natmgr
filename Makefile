@@ -8,6 +8,6 @@ default:
 	echo "Installing binary"; \
 	sudo chown root:root nat; sudo chmod 755 nat; sudo ln -sf `pwd`/nat /sbin/; \
 	echo "Creating daily cron job"; \
-	sudo ln -s `pwd`/cron/nat_restart /etc/cron.daily/; \
+	sudo ln -sf `pwd`/cron/nat_restart /etc/cron.daily/; \
 	echo "Installation complete!"
 
