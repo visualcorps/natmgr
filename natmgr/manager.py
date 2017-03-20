@@ -238,13 +238,17 @@ def restart():
 
     This command is intended to be used by the cron job to clean old rules
     automatically on a regular basis. Unless there's an issue with the cron
-    job, it usually won't be necessary to run this manually. All of the
-    functionality is also available from the `clean` command, with the only
-    difference being that this command will not prompt before taking any
-    actions.
+    job, it usually won't be necessary to run this manually.
+
+    Note that expired rules are still maintained in the `rules.json` file even
+    when they aren't added to the `/etc/init.d/nat.sh` script. This allows them
+    to (1) be permanently deleted only when a human operator deems it
+    unnecessary to keep them, and (2) be given a new expiration date and made
+    current once again.
+
+    This command does not prompt before executing actions.
     """
     mgr = Manager()
-    mgr.clean_rules()
     mgr.save_rules()
     mgr.rewrite_script()
     run_nat_script()
