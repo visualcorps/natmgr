@@ -3,7 +3,7 @@ import sys
 from contextlib import contextmanager
 from copy import deepcopy as copy
 from datetime import date, timedelta
-from os import seteuid, geteuid, fchmod
+from os import seteuid, geteuid, fchmod, makedirs
 from os.path import join, dirname, abspath
 from stat import S_IRWXU, S_IRGRP, S_IROTH
 from sys import stdout
@@ -12,7 +12,7 @@ from tempfile import TemporaryFile
 import click
 import pexpect
 
-RULES_FILE = abspath(join(dirname(__file__), 'rules.json'))
+RULES_FILE = '/etc/natmgr/rules.json'
 SCRIPT_HEAD = abspath(join(dirname(__file__), 'script_head.txt'))
 SCRIPT_FOOT = abspath(join(dirname(__file__), 'script_foot.txt'))
 NAT_SCRIPT = '/etc/init.d/nat.sh'
@@ -353,8 +353,12 @@ class Manager:
 
     def save_rules(self):
         """Save the rules, overwriting the previous file."""
-        with open(RULES_FILE, 'w') as rules_file:
+        makedirs(dirname(RULES_FILE), exist_ok=True)
+        with as_root(), open(RULES_FILE, 'w') as rules_file:
             json.dump(self.rules, rules_file, indent=2)
+
+            # Set file permissions to -rwxr--r--
+            fchmod(rules_file.fileno(), S_IRWXU | S_IRGRP | S_IROTH)
 
     def rewrite_script(self):
         """Recreate the nat script with the current rules."""
