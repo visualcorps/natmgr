@@ -77,8 +77,11 @@ def add(port):
 
     name = click.prompt('Enter the requester\'s name')
     email = click.prompt('Enter the requester\'s email')
-    ip = click.prompt('Enter the IP address of dest machine')
-    dest_port = click.prompt('Enter the port on the dest machine', type=int)
+    ip, dest_port = None, None
+    while ip is None:
+        ip, dest_port = _parse_ip_input(click.prompt('Enter the IP address of dest machine (port optional)'))
+    if dest_port is None:
+        dest_port = click.prompt('Enter the port on the dest machine', type=int)
 
     expires = 0
     date_valid = False
@@ -469,3 +472,42 @@ def run_nat_script():
             click.echo('\n\n  ** Process failed to complete within {} seconds. Terminating...\n'.format(PROC_TIMEOUT))
             exit(1)
     click.echo('{} executed successfully'.format(NAT_SCRIPT))
+
+
+def _parse_ip_input(ip_input):
+    """Parse the IP address input, return the IP address and port.
+
+    The user may have either (1) added spaces in the IP address , or
+    (2) included the port number (delimited by a colon). In both cases, this
+    is likely due to copy/pasting from previous output of the program. This
+    function searches accommodates these cases by (1) removing spaces, and
+    (2) separating the port number. If no port number was given, the second
+    value of the returned tuple will be None.
+
+    :param str ip_input: User input for the destination IP address.
+    :return: The IP address and port number entered by the user.
+    :rtype: tuple
+    """
+    # Remove any spaces, tabs
+    ip_input = ip_input.replace(' ', '').replace('\t', '')
+
+    # Check that the input isn't an IPv6 address (multiple colons)
+    if ip_input.count(':') > 1:
+        raise ValueError('Sorry, IPv6 addresses are not currently supported.')
+
+    # Split off the port number
+    parts = ip_input.rsplit(':', 1)
+
+    # Check for invalid IP format
+    try:
+        if parts[0].count('.') != 3 or False in [x.isnumeric and int(x) < 256 for x in parts[0].split('.')]:
+            # Returning (None, None) will force the user to input the IP address again
+            click.echo('Invalid IP address format. Try again.')
+            return None, None
+    except ValueError:
+        click.echo('Invalid IP address format. Try again.')
+        return None, None
+
+    if len(parts) == 2:
+        return tuple(parts)
+    return parts[0], None
