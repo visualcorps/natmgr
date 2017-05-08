@@ -69,9 +69,11 @@ def add(port):
         if mgr.existing_port(port):
             mgr.print_rules(simple=True)
             click.echo('  ** I\'m sorry, that port has already been taken. Choose one that\'s not listed above.')
+            port = None
             continue
         if port < 1024 or port >= 65535:
             click.echo('  ** Invalid port number. Must be in range 1024 <= port < 65535. Please try again.')
+            port = None
             continue
         break
 
