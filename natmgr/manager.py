@@ -18,8 +18,6 @@ SCRIPT_FOOT = abspath(join(dirname(__file__), 'script_foot.txt'))
 NAT_SCRIPT = '/etc/init.d/nat.sh'
 PROC_TIMEOUT = 10  # Max seconds for a subprocess to complete execution
 
-PRODUCTION = True
-
 __all__ = ['manage']
 
 
@@ -31,25 +29,24 @@ def manage():
 
         nat <command> --help
     """
-    if PRODUCTION:
-        try:
-            with as_root():
-                pass
-        except PermissionError as err:
-            click.echo('ERROR: {}\n\nTry running:\nsudo {}'.format(err, ' '.join(sys.argv)))
-            exit(1)
+    # Check for root privileges
+    with as_root():
+        pass
 
 
 @manage.command(name='list')
-@click.option('-c', '--current-only', help='Show only current rules.', is_flag=True)
+@click.option('-a', '--all', help='Show all rules.', is_flag=True)
+@click.option('-c', '--current-only', help='Show only current rules (Default).', is_flag=True)
 @click.option('-e', '--expired-only', help='Show only expired rules.', is_flag=True)
-def list_rules(expired_only, current_only):
+def list_rules(all, expired_only, current_only):
     """Show a list of NAT rules.
 
     You can view just the current, non-expired rules by providing the -c flag,
     or view just the expired rules with the -e flag.
     """
     mgr = Manager()
+    if all:
+        current_only = expired_only = False
     mgr.print_rules(expired_only, current_only)
 
 
@@ -261,7 +258,9 @@ def as_root():
     try:
         seteuid(0)
     except PermissionError:
-        raise PermissionError('You must run this script with root privileges!')
+        click.echo('ERROR: You must run this script with root privileges!\n\n'
+                   'Try running:\nsudo {}'.format(' '.join(sys.argv)))
+        exit(1)
     yield
     seteuid(prev_euid)
 
@@ -302,7 +301,7 @@ class Manager:
     @staticmethod
     def expired_rule(rule):
         """Evaluate if the rule has expired, return True if it has.
-    
+
         :param dict rule: The rule to check. Must have an 'expires' key.
         :return: True if the rule has expired, False otherwise.
         :rtype: bool
@@ -315,7 +314,7 @@ class Manager:
         split_expires = rule['expires'].split('-')
         if not len(split_expires) == 3:
             raise ValueError('Expiration date for rule in unknown format: {}'.format(str(rule)))
-    
+
         return (date(*[int(x) for x in split_expires]) - date.today()) < timedelta(0)
 
     def add_rule(self, rule):
@@ -330,10 +329,10 @@ class Manager:
 
         self.rules.append(rule)
         self._rules_changed = True
-    
+
     def clean_rules(self):
         """Remove expired rules.
-    
+
         :returns: Number of rules removed.
         :rtype: int
         """
@@ -348,7 +347,7 @@ class Manager:
         self.rules = copy(cleaned)
         self._rules_changed = True
         return removed_count
-    
+
     def save_rules(self):
         """Save the rules, overwriting the previous file."""
         with open(RULES_FILE, 'w') as rules_file:
@@ -356,9 +355,6 @@ class Manager:
 
     def rewrite_script(self):
         """Recreate the nat script with the current rules."""
-        if not PRODUCTION:
-            return
-
         with TemporaryFile('w+') as script:
             with open(SCRIPT_HEAD) as head:
                 script.write(head.read())
@@ -377,7 +373,7 @@ class Manager:
                 # Set file permissions to -rwxr--r--
                 fchmod(fp.fileno(), S_IRWXU | S_IRGRP | S_IROTH)
 
-    def print_rules(self, expired_only=False, current_only=False, simple=False, single=None):
+    def print_rules(self, expired_only=False, current_only=True, simple=False, single=None):
         """Print the rules to the screen, formatting them nicely.
 
         Defaults to displaying all stored rules.
