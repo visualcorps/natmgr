@@ -47,6 +47,9 @@ def list_rules(all, expired_only, current_only):
     mgr = Manager()
     if all:
         current_only = expired_only = False
+    elif not expired_only:
+        # This is what makes the -c flag on by default: neither "all" nor "expired" flags given
+        current_only = True
     mgr.print_rules(expired_only, current_only)
 
 
