@@ -8,6 +8,7 @@ from os.path import join, dirname, abspath
 from stat import S_IRWXU, S_IRGRP, S_IROTH
 from sys import stdout
 from tempfile import TemporaryFile
+from warnings import warn, catch_warnings, simplefilter
 
 import click
 import pexpect
@@ -19,6 +20,10 @@ NAT_SCRIPT = '/etc/init.d/nat.sh'
 PROC_TIMEOUT = 10  # Max seconds for a subprocess to complete execution
 
 __all__ = ['manage']
+
+
+class ExpiredRuleMatchWarning(Warning):
+    """Raised when adding a rule with a port used by an expired rule."""
 
 
 @click.group(context_settings={'help_option_names': ['-h', '--help']})
@@ -69,19 +74,31 @@ def add(port):
             port = click.prompt('Enter the port number', type=int)
         else:
             click.echo('Adding a rule for port {}'.format(port))
-        if mgr.existing_port(port):
-            mgr.print_rules(simple=True)
-            click.echo('  ** I\'m sorry, that port has already been taken. Choose one that\'s not listed above.')
-            port = None
-            continue
+
+        with catch_warnings(record=True) as w:
+            simplefilter('always', ExpiredRuleMatchWarning)
+            if mgr.existing_port(port):
+                mgr.print_rules(simple=True)
+                click.echo("  ** I'm sorry, that port has already been taken. Choose one that's not listed above.")
+                port = None
+                continue
+
+            # If w (a list) has any items in it, we got a warning about an existing rule using the specified port
+            if len(w):
+                mgr.print_rules(simple=True, current_only=False, single=port)
+                click.echo(w.pop().message)
+                if not click.confirm('\nAre you sure you want to add a rule for port {}?'.format(port)):
+                    port = None
+                    continue
+
         if port < 1024 or port >= 65535:
             click.echo('  ** Invalid port number. Must be in range 1024 <= port < 65535. Please try again.')
             port = None
             continue
         break
 
-    name = click.prompt('Enter the requester\'s name')
-    email = click.prompt('Enter the requester\'s email')
+    name = click.prompt("Enter the requester's name")
+    email = click.prompt("Enter the requester's email")
     ip, dest_port = None, None
     while ip is None:
         ip, dest_port = _parse_ip_input(click.prompt('Enter the IP address of dest machine (port optional)'))
@@ -456,10 +473,24 @@ class Manager:
                 self._rules_changed = True
 
     def existing_port(self, port):
-        """Return if the port is already used in an existing rule."""
+        """Return if the port is already used in an existing rule.
+
+        :param int port: Port number to look for in existing rules.
+        :rtype: bool
+        :raises ExpiredRuleMatchWarning: When an existing rule uses the port,
+            but is expired. Raised as a warning.
+        """
+        w = False
         for rule in self.rules:
             if rule['in_port'] == port:
-                return True
+                if self.expired_rule(rule):
+                    # The matching port is for an expired rule, just give a warning
+                    # Continue searching, since a current rule might also use the port
+                    w = True
+                else:
+                    return True
+        if w:
+            warn('  ** Port {} is used by an expired rule. Proceed with caution.'.format(port), ExpiredRuleMatchWarning)
         return False
 
 

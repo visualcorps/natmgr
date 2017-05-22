@@ -7,6 +7,30 @@ rules and when they expire. In this way, you don't have to remember to go back a
 be used for a limited period of time.
 
 
+## Three Sets of Rules
+
+There are three sets of rules involved in doing NAT-ing like how NATMGR does things:
+
+1. `/etc/natmgr/rules.json`: NATMGR uses this JSON-formatted configuration file to store all rules (current and old), as
+   well as some additional information about each rule, such as the requester's name and the date the rule expires. It
+   is purposely stored outside the `natmgr` source directory so that any updates or removals of NATMGR won't result in a
+   loss of the rules stored in `rules.json`. Changes to this file have no *direct* impact on the system. In NATMGR,
+   changes to `rules.json` take place every time the `save_rules()` method is called, which happens for every command of
+   `nat` except `nat list`.
+
+2. `/etc/init.d/nat.sh`: NATMGR composes this Bash script from three sources. The first is the `rules.json` file
+   described above. The other two are `script_head.txt` and `script_foot.txt` in the `natmgr` source directory. NATMGR
+   transforms the rules in `rules.json` to be in `iptables` format and then inserts them between the header and footer
+   before saving the result to `nat.sh`.  Changes to this file impact the system *when the script runs*, which may be
+   invoked manually but also runs on reboot.  NATMGR makes changes to `nat.sh` every time the `rewrite_script()` method
+   is called, which happens for every command of `nat` except `nat list`. For every one of those commands except `nat
+   restart`, the user is prompted if they want to run the new version of the script and force the new rules to go into
+   effect immediately.
+
+3. The third set of rules are the internal `iptables` rules that enforce the port forwarding. These rules are recreated
+   every time `/etc/init.d/nat.sh` runs.
+
+
 ## Installation
 
 First, you'll need to clone the repository, for example:
