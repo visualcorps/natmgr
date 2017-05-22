@@ -105,6 +105,28 @@ def add(port):
     if dest_port is None:
         dest_port = click.prompt('Enter the port on the dest machine', type=int)
 
+    expires = get_valid_expiration_date()
+
+    rule = dict(in_port=port, dest_ip=ip, dest_port=dest_port, requested_by=name, email=email, expires=expires)
+    try:
+        mgr.add_rule(rule)
+    except AssertionError:
+        click.echo('Something went very wrong. Please contact the project maintainers with the following info:\n'
+                   'Operation: add_rule\nValue: {}'.format(rule))
+        return
+
+    mgr.save_rules()
+    mgr.rewrite_script()
+
+    enforce_rules_now()
+
+
+def get_valid_expiration_date():
+    """Prompt user for an expiration date until a valid one is given.
+
+    :return: A valid date string in YYYY-MM-DD format, or the int 0.
+    :rtype: str
+    """
     expires = 0
     date_valid = False
     while not date_valid:
@@ -136,22 +158,77 @@ def add(port):
             expires = d.isoformat()
             date_valid = True
 
-    rule = dict(in_port=port, dest_ip=ip, dest_port=dest_port, requested_by=name, email=email, expires=expires)
-    try:
-        mgr.add_rule(rule)
-    except AssertionError:
-        click.echo('Something went very wrong. Please contact the project maintainers with the following info:\n'
-                   'Operation: add_rule\nValue: {}'.format(rule))
-        return
+    return expires
 
-    mgr.save_rules()
-    mgr.rewrite_script()
+
+def enforce_rules_now(prompt=True):
+    if not prompt:
+        run_nat_script()
+        return
 
     if click.confirm('Do you want the new rule to go into effect immediately?'):
         run_nat_script()
         click.echo('New rule now in effect.\n')
     else:
         click.echo('New rule has NOT taken effect, but it will the next time `{}` is run.'.format(NAT_SCRIPT))
+
+
+@manage.command()
+@click.argument('port', default=None, required=False, type=int)
+def renew(port):
+    """Renew the expiration of an existing rule."""
+    mgr = Manager()
+    while True:
+        if port is None:
+            port = click.prompt('Enter the port number', type=int)
+        else:
+            click.echo('Renewing a rule for port {}'.format(port))
+
+        num_matches = mgr.print_rules(simple=True, current_only=False, single=port, print_all_on_fail=True)
+        if not num_matches:
+            click.echo("  ** Given port doesn't match any known rules (listed above). Please try again.")
+            port = None
+            continue
+        break
+
+    rule = mgr.get_rule(port)
+
+    ip_addr = None
+    while isinstance(rule, list):
+        click.echo('Multiple rules match the given port.')
+        ip_addr = click.prompt('Enter the IP address of the rule you want to renew')
+
+        # The user might have copied/pasted the IP from the output, so remove any spaces
+        ip_addr = ip_addr.replace(' ', '')
+
+        _r = None
+        for r in rule:
+            if rule['dest_ip'] == ip_addr:
+                _r = r
+                break
+        if _r is not None:
+            rule = _r
+            del _r
+        else:
+            click.echo('Invalid entry. Please try again, selecting from the rules printed above.')
+
+    rule['expires'] = get_valid_expiration_date()
+
+    # Remove the old rule first
+    mgr.remove_rule(port, ip_addr)
+
+    # Now add the renewed rule
+    try:
+        mgr.add_rule(rule)
+    except AssertionError:
+        click.echo('Something went very wrong. Please contact the project maintainers with the following info:\n'
+                   'Operation: renew_rule\nValue: {}'.format(rule))
+        return
+
+    mgr.save_rules()
+    mgr.rewrite_script()
+
+    enforce_rules_now()
 
 
 @manage.command()
@@ -181,11 +258,7 @@ def remove(ports):
     mgr.rewrite_script()
 
     if changed_rules:
-        if click.confirm('Do you want the new rules to go into effect immediately?'):
-            run_nat_script()
-            click.echo('New rules now in effect.\n')
-        else:
-            click.echo('New rules have NOT taken effect, but they will the next time `{}` is run.'.format(NAT_SCRIPT))
+        enforce_rules_now()
 
 
 def remove_prompt():
@@ -214,11 +287,7 @@ def remove_prompt():
     mgr.rewrite_script()
 
     if changed_rules:
-        if click.confirm('Do you want the new rules to go into effect immediately?'):
-            run_nat_script()
-            click.echo('New rules now in effect.\n')
-        else:
-            click.echo('New rules have NOT taken effect, but they will the next time `{}` is run.'.format(NAT_SCRIPT))
+        enforce_rules_now()
 
 
 # @manage.command()
@@ -245,11 +314,7 @@ def clean():
         mgr.rewrite_script()
         # TODO: Should probably contact the person that requested the rule...
 
-        if click.confirm('Do you want the new rules to go into effect immediately?'):
-            run_nat_script()
-            click.echo('New rules now in effect.\n')
-        else:
-            click.echo('New rules have NOT taken effect, but they will the next time `{}` is run.'.format(NAT_SCRIPT))
+        enforce_rules_now()
     else:
         click.echo('No NAT rules removed.\n')
 
@@ -273,7 +338,7 @@ def restart():
     mgr = Manager()
     mgr.save_rules()
     mgr.rewrite_script()
-    run_nat_script()
+    enforce_rules_now(prompt=False)
 
 
 @contextmanager
@@ -342,6 +407,24 @@ class Manager:
 
         return (date(*[int(x) for x in split_expires]) - date.today()) < timedelta(0)
 
+    def get_rule(self, port):
+        """Return the rule(s) that match the given port.
+
+        :param int port: Port number to look for.
+        :return: List of rules if more than one matched, or a single rule
+            (dict) if it was the only match.
+        :rtype: list or dict
+        """
+        ret = []
+        for rule in self.rules:
+            if rule['in_port'] == port:
+                ret.append(rule)
+        if not len(ret):
+            return None
+        elif len(ret) == 1:
+            return ret[0]
+        return ret
+
     def add_rule(self, rule):
         """Validate, then add the new rule."""
         valid_keys = ('in_port', 'dest_ip', 'dest_port', 'requested_by', 'email', 'expires')
@@ -402,7 +485,7 @@ class Manager:
                 # Set file permissions to -rwxr--r--
                 fchmod(fp.fileno(), S_IRWXU | S_IRGRP | S_IROTH)
 
-    def print_rules(self, expired_only=False, current_only=True, simple=False, single=None):
+    def print_rules(self, expired_only=False, current_only=True, simple=False, single=None, print_all_on_fail=False):
         """Print the rules to the screen, formatting them nicely.
 
         Defaults to displaying all stored rules.
@@ -411,6 +494,9 @@ class Manager:
         :param bool current_only: Only show current rules.
         :param bool simple: Skip printing the title.
         :param int single: Only display a single rule matching this port.
+        :param bool print_all_on_fail: Print all rules if the given filters
+            don't return any results. If this happens, the method will still
+            return 0, indicating that the filters failed.
         :returns: Number of rules that matched the conditions.
         :rtype: int
         """
@@ -423,15 +509,15 @@ class Manager:
             rule_type = 'Expired'
             curr = False
 
+        header = '\n'
+        header_printed = False
         if not simple:
-            click.echo()
-            click.echo('Report of {} NAT Rules'.format(rule_type).center(56))
-        click.echo()
+            header += 'Report of {} NAT Rules'.format(rule_type).center(56) + '\n\n'
 
         line_fmt = ' {in_port:>6}  {dest_ip:<15}:{dest_port:>5}  {expires:^10}  {requested_by}'
-        click.echo(line_fmt.format(in_port='Port #', dest_ip='IP Address'.center(19), dest_port='Port',
-                                   expires='Expires On', requested_by='Requested By'))
-        click.echo(' ' + '-'*6 + '  ' + '-'*25 + '  ' + '-'*10 + '  ' + '-'*12)
+        header += line_fmt.format(in_port='Port #', dest_ip='IP Address'.center(19), dest_port='Port',
+                                  expires='Expires On', requested_by='Requested By') + '\n'
+        header += ' ' + '-'*6 + '  ' + '-'*25 + '  ' + '-'*10 + '  ' + '-'*12
 
         num_matches = 0
         for rule in self.rules:
@@ -448,10 +534,19 @@ class Manager:
             if _rule['expires'] == 0:
                 _rule['expires'] = 'Never!'
             _rule['dest_ip'] = '.'.join(['{:>4}'.format(x) for x in _rule['dest_ip'].split('.')])
+            if not header_printed:
+                click.echo(header)
+                header_printed = True
             click.echo(line_fmt.format(**_rule))
             num_matches += 1
 
+        if not num_matches and print_all_on_fail:
+            self.print_rules(expired_only=False, current_only=False, simple=simple)
+            return 0
+
         if not num_matches:
+            if not header_printed:
+                click.echo(header)
             n = ''
             if single:
                 n = ' for port {}'.format(single)
@@ -460,14 +555,20 @@ class Manager:
 
         return num_matches
 
-    def remove_rule(self, port):
+    def remove_rule(self, port, ip=None):
         """Remove rule corresponding to the given port.
 
         :param int port: Port number to look for.
+        :param str ip: Optional IP address to match against. Useful when
+            multiple rules match the same port number but you only want to
+            remove one of them.
         :rtype: None
         """
         for rule in self.rules:
             if rule['in_port'] == port:
+                if ip is not None and rule['dest_ip'] != ip:
+                    # Skip this one if the IP address was given but doesn't match
+                    continue
                 self.rules.remove(rule)
                 # click.echo('Removing rule: {}'.format(rule))
                 self._rules_changed = True
