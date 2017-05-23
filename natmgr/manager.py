@@ -34,23 +34,20 @@ def manage():
 
         nat <command> --help
     """
-    # Check for root privileges
-    with as_root():
-        pass
 
 
 @manage.command(name='list')
-@click.option('-a', '--all', help='Show all rules.', is_flag=True)
+@click.option('-a', '--all', 'all_', help='Show all rules.', is_flag=True)
 @click.option('-c', '--current-only', help='Show only current rules (Default).', is_flag=True)
 @click.option('-e', '--expired-only', help='Show only expired rules.', is_flag=True)
-def list_rules(all, expired_only, current_only):
+def list_rules(all_, expired_only, current_only):
     """Show a list of NAT rules.
 
     You can view just the current, non-expired rules by providing the -c flag,
     or view just the expired rules with the -e flag.
     """
-    mgr = Manager()
-    if all:
+    mgr = Manager(require_root=False)
+    if all_:
         current_only = expired_only = False
     elif not expired_only:
         # This is what makes the -c flag on by default: neither "all" nor "expired" flags given
@@ -290,13 +287,6 @@ def remove_prompt():
         enforce_rules_now()
 
 
-# @manage.command()
-# @click.argument('ports', type=int, nargs=-1)
-# def edit(ports):
-#     """Edit a current NAT rule."""
-#     click.echo('Interface for editing a rule')
-
-
 @manage.command()
 def clean():
     """Permanently remove expired NAT rules.
@@ -359,7 +349,10 @@ class Manager:
     RULE_TEMPLATE = '-A PREROUTING -i "$EXTIF" -p tcp --dport {in_port} -j DNAT --to-destination ' \
                     '{dest_ip}:{dest_port}\n'
 
-    def __init__(self):
+    def __init__(self, *, require_root=True):
+        if require_root:
+            with as_root():
+                pass
         try:
             with open(RULES_FILE) as rules_file:
                 # Read in rules and sort by ascending port number
@@ -600,8 +593,8 @@ def run_nat_script():
     disrupt = 'Command may disrupt existing ssh connections. Proceed with operation (y|n)?'
     success = 'Firewall is active and enabled on system startup'
 
-    click.echo('\nRunning {}\n'.format(NAT_SCRIPT))
     with as_root():
+        click.echo('\nRunning {}\n'.format(NAT_SCRIPT))
         child = pexpect.spawn(NAT_SCRIPT, timeout=PROC_TIMEOUT, logfile=stdout, encoding='utf-8')
         try:
             index = child.expect_exact([disrupt, success])
