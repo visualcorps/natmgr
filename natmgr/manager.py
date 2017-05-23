@@ -12,6 +12,7 @@ from warnings import warn, catch_warnings, simplefilter
 
 import click
 import pexpect
+from colorama import Back, Style, Fore
 
 RULES_FILE = '/etc/natmgr/rules.json'
 SCRIPT_HEAD = abspath(join(dirname(__file__), 'script_head.txt'))
@@ -547,18 +548,21 @@ class Manager:
         :rtype: int
         """
         exp, curr = True, True
+        exp_color = Style.BRIGHT + Fore.WHITE + Back.RED
         rule_type = 'All'
+        extra_len = 0
         if current_only:
             rule_type = 'Current'
             exp = False
         elif expired_only:
-            rule_type = 'Expired'
+            rule_type = exp_color + 'Expired' + Style.RESET_ALL
+            extra_len = 18
             curr = False
 
         header = '\n'
         header_printed = False
         if not simple:
-            header += 'Report of {} NAT Rules'.format(rule_type).center(56) + '\n\n'
+            header += 'Report of {} NAT Rules'.format(rule_type).center(56+extra_len) + '\n\n'
 
         line_fmt = ' {in_port:>6}  {dest_ip:<15}:{dest_port:>5}  {expires:^10}  {requested_by}'
         header += line_fmt.format(in_port='Port #', dest_ip='IP Address'.center(19), dest_port='Port',
@@ -580,6 +584,11 @@ class Manager:
             _rule = copy(rule)
             if _rule['expires'] == 0:
                 _rule['expires'] = 'Never!'
+
+            # Rule coloring
+            if rule_type == 'All' and is_exp:
+                _rule['expires'] = '{}{expires:^10}'.format(exp_color, **_rule) + Style.RESET_ALL
+
             _rule['dest_ip'] = '.'.join(['{:>4}'.format(x) for x in _rule['dest_ip'].split('.')])
             if not header_printed:
                 click.echo(header)
